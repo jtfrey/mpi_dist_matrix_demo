@@ -439,6 +439,11 @@ mpi_server_thread(
 {
     mpi_server_t    *SERVER = (mpi_server_t*)context;
     bool            is_running = true;
+
+    // We want to be cancellable at any time so that the root client can terminate
+    // its server thread w/o MPI messaging:
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
     
     switch ( SERVER->roles ) {
         case mpi_server_role_work_unit_mgr:

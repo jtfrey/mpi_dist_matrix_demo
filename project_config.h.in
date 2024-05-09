@@ -1,0 +1,19 @@
+
+#ifndef __PROJECT_CONFIG_H__
+#define __PROJECT_CONFIG_H__
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <errno.h>
+#include <time.h>
+#include <math.h>
+#include <limits.h>
+#include <pthread.h>
+
+#endif /* __PROJECT_CONFIG_H__ */
+

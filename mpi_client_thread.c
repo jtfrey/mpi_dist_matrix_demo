@@ -2,6 +2,8 @@
 #include "mpi_server_thread.h"
 #include "mpi_utils.h"
 
+#define GLOBAL_ROWS     1000
+#define GLOBAL_COLS     1000
 
 //    /opt/openmpi/5.0.3/bin/mpirun -np 4 --map-by :OVERSUBSCRIBE  ./mpi_dist_matrix
 
@@ -11,7 +13,7 @@ main(
     char*       argv[]
 )
 {
-    double                  d[10*10];
+    double                  d[(GLOBAL_ROWS / 2) * (GLOBAL_COLS / 2)];
     int                     thread_req, thread_prov;
     mpi_server_t            the_server;
     mpi_assignable_work_t   *work_units;
@@ -27,12 +29,19 @@ main(
     }
     MPI_Comm_rank(MPI_COMM_WORLD, &the_server.dist_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &the_server.dist_size);
+    
+    if ( the_server.dist_size != 4 ) {
+        mpi_printf(0, "ERROR:  this program must be run with 4 ranks");
+        MPI_Finalize();
+        exit(1);
+    }
+    
     the_server.root_rank = 0;
     
     mpi_printf(0, "");
     mpi_printf(0, "Welcome to the threaded MPI matrix element work server demo!");
     mpi_printf(0, "");
-    mpi_printf(0, "A 20x20 matrix is distributed across 4 ranks and matrix elements of the form");
+    mpi_printf(0, "A %dx%d matrix is distributed across 4 ranks and matrix elements of the form", GLOBAL_ROWS, GLOBAL_COLS);
     mpi_printf(0, "");
     mpi_printf(0, "    A_{i,j} = Sqrt[i*i + j*j]");
     mpi_printf(0, "");
@@ -41,14 +50,14 @@ main(
     MPI_Barrier(MPI_COMM_WORLD);
 
     the_server.roles = (the_server.dist_rank == 0) ? mpi_server_role_all : mpi_server_role_memory_mgr;
-    the_server.dim_global[0] = 20; the_server.dim_global[1] = 20;
-    the_server.dim_per_rank[0] = 10; the_server.dim_per_rank[1] = 10;
+    the_server.dim_global[0] = GLOBAL_ROWS; the_server.dim_global[1] = GLOBAL_COLS;
+    the_server.dim_per_rank[0] = GLOBAL_ROWS / 2; the_server.dim_per_rank[1] = GLOBAL_COLS / 2;
     the_server.dim_blocks[0] = 2; the_server.dim_blocks[1] = the_server.dist_size / 2;
     the_server.is_row_major = true;
     
     int     ri = the_server.dist_rank / the_server.dim_blocks[0], ci = the_server.dist_rank % the_server.dim_blocks[0];
-    the_server.local_sub_matrix_row_range = int_range_make(ri * 10, (ri + 1) * 10);
-    the_server.local_sub_matrix_col_range = int_range_make(ci * 10, (ci + 1) * 10);
+    the_server.local_sub_matrix_row_range = int_range_make(ri * (GLOBAL_ROWS / 2), (ri + 1) * (GLOBAL_ROWS / 2));
+    the_server.local_sub_matrix_col_range = int_range_make(ci * (GLOBAL_COLS / 2), (ci + 1) * (GLOBAL_COLS / 2));
     
     the_server.local_sub_matrix = d;
     
@@ -78,7 +87,7 @@ main(
             }
             mpi_assignable_work_complete_index(the_server.assignable_work, p_low, p_high);
             // Slow-down the root rank a little:
-            sleep(4);
+            //sleep(4);
         }
         mpi_printf(-1, "exited element loop, waiting for all work to complete");
         while ( ! mpi_assignable_work_all_completed(the_server.assignable_work) ) sleep (1);
@@ -116,7 +125,7 @@ main(
                         mpi_server_memory_write(&the_server, p, sqrt(I * I + J * J)); 
                     }
                 }
-                sleep(1);
+                //sleep(1);
                 msg.msg_type = mpi_server_msg_type_work;
                 msg.msg_id = mpi_server_msg_id_work_complete_and_allocate;
                 mpi_rc = MPI_Send(&msg, 1, mpi_get_msg_datatype(), the_server.root_rank, mpi_server_msg_tag, MPI_COMM_WORLD);
@@ -132,9 +141,9 @@ main(
         
         mpi_printf(-1, "Sub-matrices in sequence by rank:\n\nRank 0:\n");
         for ( i = 0; i < 10; i++ ) {
-            printf("    %8.3lf", d[i * 10]);
+            printf("    %8.3lf", d[mpi_server_index_global_to_local_offset(&the_server, int_pair_make(i, 0))]);
             for ( j = 1; j < 10; j++ )
-                printf(", %8.3lf", d[i * 10 + j]);
+                printf(", %8.3lf", d[mpi_server_index_global_to_local_offset(&the_server, int_pair_make(i, j))]);
             printf("\n");
         }
         MPI_Send(&i, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
@@ -143,10 +152,10 @@ main(
         
         MPI_Recv(&i, 1, MPI_INT, the_server.dist_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         printf("\nRank %d:\n", the_server.dist_rank);
-        for ( i = 0; i < 10; i++ ) {
-            printf("    %8.3lf", d[i * 10]);
-            for ( j = 1; j < 10; j++ )
-                printf(", %8.3lf", d[i * 10 + j]);
+        for ( i = the_server.local_sub_matrix_row_range.start; i < the_server.local_sub_matrix_row_range.start + 10; i++ ) {
+            printf("    %8.3lf", d[mpi_server_index_global_to_local_offset(&the_server, int_pair_make(i, the_server.local_sub_matrix_col_range.start))]);
+            for ( j = the_server.local_sub_matrix_col_range.start + 1; j < the_server.local_sub_matrix_col_range.start + 10; j++ )
+                printf(", %8.3lf", d[mpi_server_index_global_to_local_offset(&the_server, int_pair_make(i, j))]);
             printf("\n");
         }
         if ( the_server.dist_rank + 1 < the_server.dist_size )

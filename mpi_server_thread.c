@@ -89,6 +89,18 @@ mpi_get_msg_datatype()
 
 //
 
+void 
+__mpi_server_thread_cleanup(
+    void    *context
+)
+{
+    mpi_server_thread_t *SERVER = (mpi_server_thread_t*)context;
+    if ( SERVER->is_request_active ) {
+        MPI_Cancel(&SERVER->active_request);
+        SERVER->is_request_active = false;
+    }
+}
+
 void*
 __mpi_server_thread_start(
     void    *context
@@ -101,6 +113,8 @@ __mpi_server_thread_start(
     // its server thread w/o MPI messaging:
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    
+    pthread_cleanup_push(__mpi_server_thread_cleanup, context);
     
     switch ( SERVER->roles ) {
         case mpi_server_thread_role_work_unit_mgr:
@@ -118,7 +132,11 @@ __mpi_server_thread_start(
         MPI_Status              status;
         mpi_server_thread_msg_t msg, response;
         
-        MPI_Recv(&msg, 1, mpi_get_msg_datatype(), MPI_ANY_SOURCE, mpi_server_thread_msg_tag, MPI_COMM_WORLD, &status);
+        MPI_Irecv(&msg, 1, mpi_get_msg_datatype(), MPI_ANY_SOURCE, mpi_server_thread_msg_tag, MPI_COMM_WORLD, &SERVER->active_request);
+        SERVER->is_request_active = true;
+        MPI_Wait(&SERVER->active_request, &status);
+        SERVER->is_request_active = false;
+        
         switch ( msg.msg_type ) {
             case mpi_server_thread_msg_type_work: {
                 switch ( msg.msg_id ) {
@@ -166,6 +184,7 @@ __mpi_server_thread_start(
         }
     }
     mpi_printf(-1, "exiting server thread");
+    pthread_cleanup_pop(0);
     return NULL;
 }
 
@@ -178,14 +197,14 @@ enum {
 
 mpi_server_thread_t*
 mpi_server_thread_init(
-    mpi_server_thread_t    *server_info,
-    int             root_rank,
-    int             global_rows,
-    int             global_cols,
-    int             grid_rows,
-    int             grid_cols,
-    bool            is_row_major,
-    double          *local_sub_matrix
+    mpi_server_thread_t *server_info,
+    int                 root_rank,
+    int                 global_rows,
+    int                 global_cols,
+    int                 grid_rows,
+    int                 grid_cols,
+    bool                is_row_major,
+    double              *local_sub_matrix
 )
 {
     int             r, c;
@@ -202,6 +221,8 @@ mpi_server_thread_init(
     } else {
         server_info->flags = 0;
     }
+    
+    server_info->is_request_active = false;
     
     // Initialize MPI comm dimensions:
     MPI_Comm_rank(MPI_COMM_WORLD, &server_info->dist_rank);

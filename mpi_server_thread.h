@@ -172,6 +172,10 @@ typedef struct {
     // The thread we will run in:
     pthread_t           server_thread;
     
+    // For active MPI send/recv:
+    bool                is_request_active;
+    MPI_Request         active_request;
+    
     // Assignable work (for the root rank):
     struct mpi_assignable_work *assignable_work;
 } mpi_server_thread_t;

@@ -24,7 +24,7 @@ mpi_printf(
         is_inited = true;
     }
     if ( (rank == -1) || (rank == _rank) ) {
-        n = printf("[MPI-%0*d:%0*d] ", _digits, _rank, _digits, _size);
+        n = printf("[MPI-%0*d:%0*d][%d] ", _digits, _rank, _digits, _size, getpid());
         va_start(argv, fmt);
         n += vprintf(fmt, argv);
         va_end(argv);

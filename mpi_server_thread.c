@@ -4,21 +4,21 @@
 
 //
 
-const int mpi_server_msg_tag = 2;
-const int mpi_client_msg_tag = 3;
+const int mpi_server_thread_msg_tag = 2;
+const int mpi_client_thread_msg_tag = 3;
 
 //
 
-static int __mpi_server_int_pair_type_fields = 2;
-static int __mpi_server_int_pair_type_counts[] = {
+static int __mpi_server_thread_int_pair_type_fields = 2;
+static int __mpi_server_thread_int_pair_type_counts[] = {
                     1, // 1 int
                     1, // 1 int
                 };
-static MPI_Aint __mpi_server_int_pair_type_offsets[] = {
+static MPI_Aint __mpi_server_thread_int_pair_type_offsets[] = {
                     offsetof(int_pair_t, i),
                     offsetof(int_pair_t, j),
                 };
-static MPI_Datatype __mpi_server_int_pair_type_types[] = {
+static MPI_Datatype __mpi_server_thread_int_pair_type_types[] = {
                     MPI_INT,
                     MPI_INT
                 };
@@ -31,10 +31,10 @@ mpi_get_int_pair_datatype()
     
     if ( ! is_inited ) {
         MPI_Type_create_struct(
-                __mpi_server_int_pair_type_fields,
-                __mpi_server_int_pair_type_counts,
-                __mpi_server_int_pair_type_offsets,
-                __mpi_server_int_pair_type_types,
+                __mpi_server_thread_int_pair_type_fields,
+                __mpi_server_thread_int_pair_type_counts,
+                __mpi_server_thread_int_pair_type_offsets,
+                __mpi_server_thread_int_pair_type_types,
                 &dtype);
         MPI_Type_commit(&dtype);
         is_inited = true;
@@ -44,22 +44,22 @@ mpi_get_int_pair_datatype()
 
 //
 
-static int __mpi_server_msg_type_fields = 5;
-static int __mpi_server_msg_type_counts[] = {
+static int __mpi_server_thread_msg_type_fields = 5;
+static int __mpi_server_thread_msg_type_counts[] = {
                     1, // 1 int
                     1, // 1 int
                     1, // 1 int_pair
                     1, // 1 int_pair
                     1, // 1 double
                 };
-static MPI_Aint __mpi_server_msg_type_offsets[] = {
-                    offsetof(mpi_server_msg_t, msg_type),
-                    offsetof(mpi_server_msg_t, msg_id),
-                    offsetof(mpi_server_msg_t, p_low),
-                    offsetof(mpi_server_msg_t, p_high),
-                    offsetof(mpi_server_msg_t, value)
+static MPI_Aint __mpi_server_thread_msg_type_offsets[] = {
+                    offsetof(mpi_server_thread_msg_t, msg_type),
+                    offsetof(mpi_server_thread_msg_t, msg_id),
+                    offsetof(mpi_server_thread_msg_t, p_low),
+                    offsetof(mpi_server_thread_msg_t, p_high),
+                    offsetof(mpi_server_thread_msg_t, value)
                 };
-static MPI_Datatype __mpi_server_msg_type_types[] = {
+static MPI_Datatype __mpi_server_thread_msg_type_types[] = {
                     MPI_INT,
                     MPI_INT,
                     0,          // must be filled-in later
@@ -74,12 +74,12 @@ mpi_get_msg_datatype()
     static MPI_Datatype dtype;
     
     if ( ! is_inited ) {
-        __mpi_server_msg_type_types[2] = __mpi_server_msg_type_types[3] = mpi_get_int_pair_datatype();
+        __mpi_server_thread_msg_type_types[2] = __mpi_server_thread_msg_type_types[3] = mpi_get_int_pair_datatype();
         MPI_Type_create_struct(
-                __mpi_server_msg_type_fields,
-                __mpi_server_msg_type_counts,
-                __mpi_server_msg_type_offsets,
-                __mpi_server_msg_type_types,
+                __mpi_server_thread_msg_type_fields,
+                __mpi_server_thread_msg_type_counts,
+                __mpi_server_thread_msg_type_offsets,
+                __mpi_server_thread_msg_type_types,
                 &dtype);
         MPI_Type_commit(&dtype);
         is_inited = true;
@@ -89,9 +89,213 @@ mpi_get_msg_datatype()
 
 //
 
+void*
+__mpi_server_thread_start(
+    void    *context
+)
+{
+    mpi_server_thread_t *SERVER = (mpi_server_thread_t*)context;
+    bool                is_running = true;
+
+    // We want to be cancellable at any time so that the root client can terminate
+    // its server thread w/o MPI messaging:
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    
+    switch ( SERVER->roles ) {
+        case mpi_server_thread_role_work_unit_mgr:
+            mpi_printf(-1, "server thread running a work unit manager");
+            break;
+        case mpi_server_thread_role_memory_mgr:
+            mpi_printf(-1, "server thread running a memory manager");
+            break;
+        case mpi_server_thread_role_all:
+            mpi_printf(-1, "server thread running work unit and memory managers");
+            break;
+    }
+    
+    while ( is_running ) {
+        MPI_Status              status;
+        mpi_server_thread_msg_t msg, response;
+        
+        MPI_Recv(&msg, 1, mpi_get_msg_datatype(), MPI_ANY_SOURCE, mpi_server_thread_msg_tag, MPI_COMM_WORLD, &status);
+        switch ( msg.msg_type ) {
+            case mpi_server_thread_msg_type_work: {
+                switch ( msg.msg_id ) {
+                    case mpi_server_thread_msg_id_shutdown:
+                        is_running = false;
+                        break;
+                    case mpi_server_thread_msg_id_work_complete_and_allocate:
+                        mpi_assignable_work_complete(SERVER->assignable_work, msg.p_low, msg.p_high);
+                    case mpi_server_thread_msg_id_work_request: {
+                        // The sender rank determines the primary work set we want to consult:
+                        int         sender_rank = status.MPI_SOURCE;
+                        int         primary_slot = (SERVER->is_row_major) ?
+                                                    (sender_rank / SERVER->dim_blocks[1])
+                                                  : (sender_rank / SERVER->dim_blocks[0]);
+                        int         next_index;
+                        
+                        //  By default, no more work available, period:
+                        response.msg_type = mpi_server_thread_msg_type_work;
+                        response.msg_id = mpi_server_thread_msg_id_work_allocated;
+                        response.p_low = response.p_high = int_pair_make(-1, -1);
+                        
+                        mpi_assignable_work_next_unit(SERVER->assignable_work, sender_rank, primary_slot, &response.p_low, &response.p_high);
+                        MPI_Send(&response, 1, mpi_get_msg_datatype(), sender_rank, mpi_client_thread_msg_tag, MPI_COMM_WORLD);
+                        break;
+                    }
+                    case mpi_server_thread_msg_id_work_completed: {
+                        mpi_assignable_work_complete(SERVER->assignable_work, msg.p_low, msg.p_high);
+                        break;
+                    }
+                }
+                break;
+            }
+            case mpi_server_thread_msg_type_memory: {
+                switch ( msg.msg_id ) {
+                    case mpi_server_thread_msg_id_shutdown:
+                        is_running = false;
+                        break;
+                    case mpi_server_thread_msg_id_memory_write: {
+                        mpi_server_thread_memory_write(SERVER, msg.p_low, msg.value);
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    mpi_printf(-1, "exiting server thread");
+    return NULL;
+}
+
+//
+
+enum {
+    mpi_server_thread_flag_was_allocated = 1 << 0,
+    mpi_server_thread_flag_owns_local_sub_matrix = 1 << 1
+};
+
+mpi_server_thread_t*
+mpi_server_thread_init(
+    mpi_server_thread_t    *server_info,
+    int             root_rank,
+    int             global_rows,
+    int             global_cols,
+    int             grid_rows,
+    int             grid_cols,
+    bool            is_row_major,
+    double          *local_sub_matrix
+)
+{
+    int             r, c;
+    
+    // Force the MPI datatypes to get initialized now to avoid later
+    // race conditions:
+    mpi_get_msg_datatype();
+    
+    // If server_info is NULL, allocate a new one:
+    if ( ! server_info ) {
+        server_info = (mpi_server_thread_t*)malloc(sizeof(mpi_server_thread_t));
+        if ( ! server_info ) return NULL;
+        server_info->flags = mpi_server_thread_flag_was_allocated;
+    } else {
+        server_info->flags = 0;
+    }
+    
+    // Initialize MPI comm dimensions:
+    MPI_Comm_rank(MPI_COMM_WORLD, &server_info->dist_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &server_info->dist_size);
+    
+    // Which rank is root?
+    server_info->root_rank = root_rank;
+    
+    // Fill-in dimensions:
+    server_info->dim_global[0] = global_rows;
+    server_info->dim_global[1] = global_cols;
+    
+    server_info->dim_per_rank[0] = global_rows / grid_rows;
+    server_info->dim_per_rank[1] = global_cols / grid_cols;
+    
+    server_info->dim_blocks[0] = grid_rows;
+    server_info->dim_blocks[1] = grid_cols;
+    
+    server_info->is_row_major = is_row_major;
+    
+    // Assign global row/col index ranges associated with this rank:
+    r = server_info->dist_rank / server_info->dim_blocks[0];
+    c = server_info->dist_rank % server_info->dim_blocks[0];
+    server_info->local_sub_matrix_row_range = int_range_make(r * server_info->dim_per_rank[0], server_info->dim_per_rank[0]);
+    server_info->local_sub_matrix_col_range = int_range_make(c * server_info->dim_per_rank[1], server_info->dim_per_rank[1]);
+    
+    // Setup the local sub-matrix storage:
+    if ( ! local_sub_matrix ) {
+        local_sub_matrix = (double*)malloc(sizeof(double) * server_info->dim_per_rank[0] * server_info->dim_per_rank[1]);
+        if ( ! local_sub_matrix ) {
+            if ( server_info->flags & mpi_server_thread_flag_was_allocated ) free((void*)server_info);
+            return NULL;
+        }
+        server_info->flags |= mpi_server_thread_flag_owns_local_sub_matrix;
+    }
+    server_info->local_sub_matrix = local_sub_matrix;
+
+    // Setup the role(s) for this instance:
+    if ( server_info->dist_rank == server_info->root_rank ) {
+        server_info->roles = mpi_server_thread_role_all;
+        server_info->assignable_work = mpi_assignable_work_create(server_info);
+    } else {        
+        server_info->roles = mpi_server_thread_role_memory_mgr;
+        server_info->assignable_work = NULL;
+    }
+    
+    return server_info;
+}
+
+//
+
 bool
-mpi_server_index_global_to_local(
-    mpi_server_t        *server_info,
+mpi_server_thread_start(
+    mpi_server_thread_t *server_info
+)
+{
+    int         rc = pthread_create(
+                            &server_info->server_thread,
+                            NULL,
+                            __mpi_server_thread_start,
+                            (void*)server_info
+                        );
+    return (rc == 0);
+}
+
+//
+
+bool
+mpi_server_thread_cancel(
+    mpi_server_thread_t *server_info
+)
+{
+    int         rc = pthread_cancel(server_info->server_thread);
+    
+    return (rc == 0);
+}
+
+//
+
+bool
+mpi_server_thread_join(
+    mpi_server_thread_t *server_info
+)
+{
+    int         rc = pthread_join(server_info->server_thread, NULL);
+    
+    return (rc == 0);
+}
+
+//
+
+bool
+mpi_server_thread_index_global_to_local(
+    mpi_server_thread_t *server_info,
     int_pair_t          *p
 )
 {
@@ -108,8 +312,8 @@ mpi_server_index_global_to_local(
 //
 
 bool
-mpi_server_index_local_to_global(
-    mpi_server_t        *server_info,
+mpi_server_thread_index_local_to_global(
+    mpi_server_thread_t *server_info,
     int_pair_t          *p
 )
 {
@@ -126,12 +330,12 @@ mpi_server_index_local_to_global(
 //
 
 int
-mpi_server_index_global_to_local_offset(
-    mpi_server_t        *server_info,
+mpi_server_thread_index_global_to_local_offset(
+    mpi_server_thread_t *server_info,
     int_pair_t          p
 )
 {
-    if ( mpi_server_index_global_to_local(server_info, &p) ) {
+    if ( mpi_server_thread_index_global_to_local(server_info, &p) ) {
         if ( server_info->is_row_major ) return int_pair_get_i_major_offset(p, server_info->dim_per_rank[1]);
         return int_pair_get_j_major_offset(p, server_info->dim_per_rank[0]);
     }
@@ -141,8 +345,8 @@ mpi_server_index_global_to_local_offset(
 //
 
 int
-mpi_server_index_to_rank(
-    mpi_server_t        *server_info,
+mpi_server_thread_index_to_rank(
+    mpi_server_thread_t *server_info,
     int_pair_t          p
 )
 {
@@ -158,29 +362,29 @@ mpi_server_index_to_rank(
 //
 
 void
-mpi_server_memory_write(
-    mpi_server_t    *server_info,
-    int_pair_t      p,
-    double          value
+mpi_server_thread_memory_write(
+    mpi_server_thread_t *server_info,
+    int_pair_t          p,
+    double              value
 )
 {
-    int             local_offset = mpi_server_index_global_to_local_offset(server_info, p);
+    int             local_offset = mpi_server_thread_index_global_to_local_offset(server_info, p);
     
     if ( local_offset >= 0 ) {
         server_info->local_sub_matrix[local_offset] = value;
     } else {
         // Send to the rank that handles this sub-matrix:
-        mpi_server_msg_t    msg = {
-                                .msg_type = mpi_server_msg_type_memory,
-                                .msg_id = mpi_server_msg_id_memory_write,
-                                .p_low = p,
-                                .p_high = p,
-                                .value = value
-                            };
+        mpi_server_thread_msg_t    msg = {
+                                        .msg_type = mpi_server_thread_msg_type_memory,
+                                        .msg_id = mpi_server_thread_msg_id_memory_write,
+                                        .p_low = p,
+                                        .p_high = p,
+                                        .value = value
+                                    };
         MPI_Send(
             &msg, 1, mpi_get_msg_datatype(),
-            mpi_server_index_to_rank(server_info, p),
-            mpi_server_msg_tag,
+            mpi_server_thread_index_to_rank(server_info, p),
+            mpi_server_thread_msg_tag,
             MPI_COMM_WORLD);
     }
 }
@@ -188,9 +392,9 @@ mpi_server_memory_write(
 //
 
 void
-mpi_server_summary(
-    mpi_server_t    *the_server,
-    FILE            *stream
+mpi_server_thread_summary(
+    mpi_server_thread_t *the_server,
+    FILE                *stream
 )
 {
     fprintf(stream, "mpi_server@%p (roles=%X, dim_global=(%d,%d), dim_per_rank=(%d,%d),\n"
@@ -205,7 +409,7 @@ mpi_server_summary(
                     the_server->local_sub_matrix_col_range.start,
                     int_range_get_end(the_server->local_sub_matrix_col_range)
                 );
-    if ( the_server->roles & mpi_server_role_work_unit_mgr ) {
+    if ( the_server->roles & mpi_server_thread_role_work_unit_mgr ) {
         fprintf(stream, "    assignable_work: ");
         mpi_assignable_work_summary(the_server->assignable_work, stream);
     }
@@ -218,7 +422,7 @@ mpi_server_summary(
 
 mpi_assignable_work_t*
 mpi_assignable_work_create(
-    mpi_server_t    *server_info
+    mpi_server_thread_t     *server_info
 )
 {
     mpi_assignable_work_t   *new_work;
@@ -311,7 +515,7 @@ mpi_assignable_work_all_completed(
 //
 
 bool
-mpi_assignable_work_next_index(
+mpi_assignable_work_next_unit(
     mpi_assignable_work_t   *work_units,
     int                     target_rank,
     int                     primary_slot,
@@ -374,7 +578,7 @@ mpi_assignable_work_next_index(
 //
 
 void
-mpi_assignable_work_complete_index(
+mpi_assignable_work_complete(
     mpi_assignable_work_t   *work_units,
     int_pair_t              p_low,
     int_pair_t              p_high
@@ -426,90 +630,4 @@ mpi_assignable_work_summary(
         i++;
     }
     fprintf(stream, "}\n");
-}
-
-//
-////
-//
-
-void*
-mpi_server_thread(
-    void    *context
-)
-{
-    mpi_server_t    *SERVER = (mpi_server_t*)context;
-    bool            is_running = true;
-
-    // We want to be cancellable at any time so that the root client can terminate
-    // its server thread w/o MPI messaging:
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-    
-    switch ( SERVER->roles ) {
-        case mpi_server_role_work_unit_mgr:
-            mpi_printf(-1, "server thread running a work unit manager");
-            break;
-        case mpi_server_role_memory_mgr:
-            mpi_printf(-1, "server thread running a memory manager");
-            break;
-        case mpi_server_role_all:
-            mpi_printf(-1, "server thread running work unit and memory managers");
-            break;
-    }
-    
-    while ( is_running ) {
-        MPI_Status          status;
-        mpi_server_msg_t    msg, response;
-        
-        MPI_Recv(&msg, 1, mpi_get_msg_datatype(), MPI_ANY_SOURCE, mpi_server_msg_tag, MPI_COMM_WORLD, &status);
-        switch ( msg.msg_type ) {
-            case mpi_server_msg_type_work: {
-                switch ( msg.msg_id ) {
-                    case mpi_server_msg_id_shutdown:
-                        is_running = false;
-                        break;
-                    case mpi_server_msg_id_work_complete_and_allocate:
-                        mpi_assignable_work_complete_index(SERVER->assignable_work, msg.p_low, msg.p_high);
-                    case mpi_server_msg_id_work_request: {
-                        // The sender rank determines the primary work set we want to consult:
-                        int         sender_rank = status.MPI_SOURCE;
-                        int         primary_slot = (SERVER->is_row_major) ?
-                                                    (sender_rank / SERVER->dim_blocks[1])
-                                                  : (sender_rank / SERVER->dim_blocks[0]);
-                        int         next_index;
-                        
-                        //  By default, no more work available, period:
-                        response.msg_type = mpi_server_msg_type_work;
-                        response.msg_id = mpi_server_msg_id_work_allocated;
-                        response.p_low = response.p_high = int_pair_make(-1, -1);
-                        
-                        mpi_assignable_work_next_index(SERVER->assignable_work, sender_rank, primary_slot, &response.p_low, &response.p_high);
-                        MPI_Send(&response, 1, mpi_get_msg_datatype(), sender_rank, mpi_client_msg_tag, MPI_COMM_WORLD);
-                        break;
-                    }
-                    case mpi_server_msg_id_work_completed: {
-                        mpi_assignable_work_complete_index(SERVER->assignable_work, msg.p_low, msg.p_high);
-                        break;
-                    }
-                }
-                break;
-            }
-            case mpi_server_msg_type_memory: {
-                switch ( msg.msg_id ) {
-                    case mpi_server_msg_id_shutdown:
-                        is_running = false;
-                        break;
-                    case mpi_server_msg_id_memory_write: {
-                        int         offset = mpi_server_index_global_to_local_offset(SERVER, msg.p_low);
-                        
-                        if ( offset >= 0 ) SERVER->local_sub_matrix[offset] = msg.value;
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-    }
-    mpi_printf(-1, "exiting server thread");
-    return NULL;
 }

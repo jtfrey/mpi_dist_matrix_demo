@@ -16,18 +16,18 @@
 #include "mpi.h"
 
 /*
- * @constant mpi_server_msg_tag
+ * @constant mpi_server_thread_msg_tag
  *
  * MPI tag used to send/receive messages to a rank's server thread.
  */
-extern const int mpi_server_msg_tag;
+extern const int mpi_server_thread_msg_tag;
 
 /*
  * @constant mpi_client_msg_tag
  *
  * MPI tag used to send/receive messages to a rank's client thread.
  */
-extern const int mpi_client_msg_tag;
+extern const int mpi_client_thread_msg_tag;
 
 /*
  * @function mpi_get_int_pair_datatype
@@ -60,18 +60,18 @@ MPI_Datatype mpi_get_msg_datatype();
  * rank in the runtime.
  */
 enum {
-    mpi_server_role_work_unit_mgr = 1 << 0,
-    mpi_server_role_memory_mgr = 1 << 1,
+    mpi_server_thread_role_work_unit_mgr = 1 << 0,
+    mpi_server_thread_role_memory_mgr = 1 << 1,
     //
-    mpi_server_role_all = mpi_server_role_work_unit_mgr | mpi_server_role_memory_mgr
+    mpi_server_thread_role_all = mpi_server_thread_role_work_unit_mgr | mpi_server_thread_role_memory_mgr
 };
 
 /*
- * @typedef mpi_server_role_t
+ * @typedef mpi_server_thread_role_t
  *
  * The type of a MPI server role descriptor.
  */
-typedef unsigned int mpi_server_role_t;
+typedef unsigned int mpi_server_thread_role_t;
 
 /*
  * @enum MPI distributed matrix element server, message types
@@ -80,8 +80,8 @@ typedef unsigned int mpi_server_role_t;
  * with the roles it can adopt).
  */
 enum {
-    mpi_server_msg_type_work = 1,
-    mpi_server_msg_type_memory = 2
+    mpi_server_thread_msg_type_work = 1,
+    mpi_server_thread_msg_type_memory = 2
 };
 
 /*
@@ -92,18 +92,18 @@ enum {
  * shutdown id being implemented by all roles.
  */
 enum {
-    mpi_server_msg_id_work_request = 0,
-    mpi_server_msg_id_work_allocated = 1,
-    mpi_server_msg_id_work_completed = 2,
-    mpi_server_msg_id_work_complete_and_allocate = 3,
+    mpi_server_thread_msg_id_work_request = 0,
+    mpi_server_thread_msg_id_work_allocated = 1,
+    mpi_server_thread_msg_id_work_completed = 2,
+    mpi_server_thread_msg_id_work_complete_and_allocate = 3,
     //
-    mpi_server_msg_id_memory_write = 0,
+    mpi_server_thread_msg_id_memory_write = 0,
     //
-    mpi_server_msg_id_shutdown = 255
+    mpi_server_thread_msg_id_shutdown = 255
 };
 
 /*
- * @typedef mpi_server_msg_t
+ * @typedef mpi_server_thread_msg_t
  *
  * The data structure used on-the-wire for all server thread
  * messages.  Specific message ids will/will not use all of
@@ -118,14 +118,15 @@ typedef struct {
     int         msg_id;
     int_pair_t  p_low, p_high;
     double      value;
-} mpi_server_msg_t;
+} mpi_server_thread_msg_t;
 
 /*
- * @typedef mpi_server_t
+ * @typedef mpi_server_thread_t
  *
  */
 typedef struct {
-    mpi_server_role_t   roles;
+    unsigned int                flags;
+    mpi_server_thread_role_t    roles;
     //
     // The sub-matrix mapping formula is such that given
     // blocks of dim_per_rank rows/cols distributed either
@@ -168,28 +169,45 @@ typedef struct {
     // Local sub-matrix:
     double              *local_sub_matrix;
     
+    // The thread we will run in:
+    pthread_t           server_thread;
+    
     // Assignable work (for the root rank):
     struct mpi_assignable_work *assignable_work;
-} mpi_server_t;
+} mpi_server_thread_t;
 
-bool mpi_server_index_global_to_local(mpi_server_t *server_info, int_pair_t *p);
+mpi_server_thread_t*
+mpi_server_thread_init(
+    mpi_server_thread_t *server_info,
+    int root_rank,
+    int global_rows, int global_cols,
+    int grid_rows, int grid_cols,
+    bool is_row_major,
+    double *local_sub_matrix
+);
 
-bool mpi_server_index_local_to_global(mpi_server_t *server_info, int_pair_t *p);
+bool mpi_server_thread_start(mpi_server_thread_t *server_info);
+bool mpi_server_thread_cancel(mpi_server_thread_t *server_info);
+bool mpi_server_thread_join(mpi_server_thread_t *server_info);
 
-int mpi_server_index_global_to_local_offset(mpi_server_t *server_info, int_pair_t p);
+bool mpi_server_thread_index_global_to_local(mpi_server_thread_t *server_info, int_pair_t *p);
 
-int mpi_server_index_to_rank(mpi_server_t *server_info, int_pair_t p);
+bool mpi_server_thread_index_local_to_global(mpi_server_thread_t *server_info, int_pair_t *p);
 
-void mpi_server_memory_write(mpi_server_t *server_info, int_pair_t p, double value);
+int mpi_server_thread_index_global_to_local_offset(mpi_server_thread_t *server_info, int_pair_t p);
 
-void mpi_server_summary(mpi_server_t *the_server, FILE *stream);
+int mpi_server_thread_index_to_rank(mpi_server_thread_t *server_info, int_pair_t p);
 
-void* mpi_server_thread(void *context);
+void mpi_server_thread_memory_write(mpi_server_thread_t *server_info, int_pair_t p, double value);
+
+void mpi_server_thread_summary(mpi_server_thread_t *the_server, FILE *stream);
+
+void* mpi_server_thread_thread(void *context);
 
 
 typedef struct mpi_assignable_work {
     // Reference to the local server info:
-    mpi_server_t        *server_info;
+    mpi_server_thread_t     *server_info;
     
     //
     // For a row-major distribution, it would be ideal to assign rows
@@ -231,16 +249,16 @@ typedef struct mpi_assignable_work {
 
 //
 
-mpi_assignable_work_t* mpi_assignable_work_create(mpi_server_t *server_info);
+mpi_assignable_work_t* mpi_assignable_work_create(mpi_server_thread_t *server_info);
 
 void mpi_assignable_work_destroy(mpi_assignable_work_t *work_units);
 
 bool mpi_assignable_work_all_completed(mpi_assignable_work_t *work_units);
 
-bool mpi_assignable_work_next_index(mpi_assignable_work_t *work_units, int target_rank,
+bool mpi_assignable_work_next_unit(mpi_assignable_work_t *work_units, int target_rank,
             int primary_slot, int_pair_t *p_low, int_pair_t *p_high);
 
-void mpi_assignable_work_complete_index(mpi_assignable_work_t *work_units, int_pair_t p_low, int_pair_t p_high);
+void mpi_assignable_work_complete(mpi_assignable_work_t *work_units, int_pair_t p_low, int_pair_t p_high);
 
 void mpi_assignable_work_summary(mpi_assignable_work_t *work_units, FILE *stream);
 

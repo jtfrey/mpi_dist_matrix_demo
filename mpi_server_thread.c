@@ -95,10 +95,13 @@ __mpi_server_thread_cleanup(
 )
 {
     mpi_server_thread_t *SERVER = (mpi_server_thread_t*)context;
+    
+    pthread_mutex_lock(&SERVER->request_lock);
     if ( SERVER->is_request_active ) {
         MPI_Cancel(&SERVER->active_request);
         SERVER->is_request_active = false;
     }
+    pthread_mutex_unlock(&SERVER->request_lock);
 }
 
 void*
@@ -132,10 +135,14 @@ __mpi_server_thread_start(
         MPI_Status              status;
         mpi_server_thread_msg_t msg, response;
         
+        pthread_mutex_lock(&SERVER->request_lock);
         MPI_Irecv(&msg, 1, mpi_get_msg_datatype(), MPI_ANY_SOURCE, mpi_server_thread_msg_tag, MPI_COMM_WORLD, &SERVER->active_request);
         SERVER->is_request_active = true;
+        pthread_mutex_unlock(&SERVER->request_lock);
         MPI_Wait(&SERVER->active_request, &status);
+        pthread_mutex_lock(&SERVER->request_lock);
         SERVER->is_request_active = false;
+        pthread_mutex_unlock(&SERVER->request_lock);
         
         switch ( msg.msg_type ) {
             case mpi_server_thread_msg_type_work: {
@@ -223,6 +230,7 @@ mpi_server_thread_init(
     }
     
     server_info->is_request_active = false;
+    pthread_mutex_init(&server_info->request_lock, NULL);
     
     // Initialize MPI comm dimensions:
     MPI_Comm_rank(MPI_COMM_WORLD, &server_info->dist_rank);

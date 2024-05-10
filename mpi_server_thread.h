@@ -175,6 +175,7 @@ typedef struct {
     // For active MPI send/recv:
     bool                is_request_active;
     MPI_Request         active_request;
+    pthread_mutex_t     request_lock;
     
     // Assignable work (for the root rank):
     struct mpi_assignable_work *assignable_work;

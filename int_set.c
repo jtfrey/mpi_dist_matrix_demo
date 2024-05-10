@@ -73,12 +73,13 @@ int_set_destroy(
 
 //
 
-int
+base_int_t
 int_set_get_length(
     int_set_ref S
 )
 {
-    int         l = 0, ri = 0;
+    base_int_t  l = 0;
+    int         ri = 0;
     
     while ( ri < S->length ) l += S->elements[ri++].length;
     return l;
@@ -89,7 +90,7 @@ int_set_get_length(
 bool
 int_set_push_int(
     int_set_ref S,
-    int         i
+    base_int_t  i
 )
 {
     int         ri = 0;
@@ -173,9 +174,9 @@ int_set_push_range(
     while ( ri < S->length ) {
         // Do we have overlap?
         if ( int_range_does_intersect(S->elements[ri], r) ) {
-            int     end_r  = r.start + r.length - 1;
-            int     end_ri = S->elements[ri].start + S->elements[ri].length - 1;
-            bool    ordered_asc;
+            base_int_t  end_r  = int_range_get_end(r);
+            base_int_t  end_ri = int_range_get_end(S->elements[ri]);
+            bool        ordered_asc;
             
             // Is r contained fully within the range?
             if ( r.start >= S->elements[ri].start && end_r <= end_ri ) return true;
@@ -205,7 +206,7 @@ int_set_push_range(
         }
         
         // Does r sit just before this range?
-        if ( r.start + r.length == S->elements[ri].start ) {
+        if ( int_range_get_max(r) == S->elements[ri].start ) {
             S->elements[ri] = int_range_union(r, S->elements[ri]);
             
             // Does the new range now overlap with or directly precede the
@@ -223,7 +224,7 @@ int_set_push_range(
         }
         
         // Does r sit just after this range?
-        if ( S->elements[ri].start + S->elements[ri].length == r.start ) {
+        if ( int_range_get_max(S->elements[ri]) == r.start ) {
             S->elements[ri] = int_range_union(S->elements[ri], r);
             
             // Does the new range now overlap with or directly precede the
@@ -269,7 +270,7 @@ int_set_push_range(
 bool
 int_set_remove_int(
     int_set_ref S,
-    int         i
+    base_int_t  i
 )
 {
     int         ri = 0;
@@ -287,7 +288,7 @@ int_set_remove_int(
                 did_contract = true;
             }
             // Does the range end with this number?
-            else if ( i == S->elements[ri].start + S->elements[ri].length - 1 ) {
+            else if ( i == int_range_get_end(S->elements[ri]) ) {
                 S->elements[ri].length--;
                 did_contract = true;
             }
@@ -339,7 +340,7 @@ int_set_remove_range(
 bool
 int_set_peek_next_int(
     int_set_ref S,
-    int         *i
+    base_int_t  *i
 )
 {
     if ( S->length ) {
@@ -354,7 +355,7 @@ int_set_peek_next_int(
 bool
 int_set_pop_next_int(
     int_set_ref S,
-    int         *i
+    base_int_t  *i
 )
 {
     if ( S->length ) {
@@ -381,7 +382,7 @@ int_set_summary(
     
     fprintf(stream, "int_set@%p (l=%d, c=%d) {", S, S->length, S->capacity);
     while ( ri < S->length ) {
-        fprintf(stream, (counter == 0) ? "\n    [%d, %d]" : ", [%d, %d]",
+        fprintf(stream, (counter == 0) ? "\n    [" BASE_INT_FMT ", " BASE_INT_FMT "]" : ", [" BASE_INT_FMT ", " BASE_INT_FMT "]",
                     S->elements[ri].start, S->elements[ri].start + S->elements[ri].length - 1);
         counter = (counter + 1) % 16;
         ri++;
@@ -416,7 +417,7 @@ main()
     int_set_remove_int(S, 11);
     int_set_summary(S, stdout);
     
-    while ( int_set_pop_next_int(S, &i) ) printf("...%d...\n", i);
+    while ( int_set_pop_next_int(S, &i) ) printf("..." BASE_INT_FMT "...\n", i);
 
     int_set_destroy(S);
 

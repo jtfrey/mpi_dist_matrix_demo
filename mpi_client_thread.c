@@ -5,11 +5,11 @@
 // Include the matrix element kernel function:
 #include "me_kernel.h"
 
-#define GLOBAL_ROWS     1000  /* Global matrix dimension, rows */
-#define GLOBAL_COLS     1000    /* Global matrix dimension, cols */
-#define EXPECTED_SIZE     16   /* Number of MPI ranks expected */
-#define GRID_ROWS          4
-#define GRID_COLS          4
+#define GLOBAL_ROWS     10000LL  /* Global matrix dimension, rows */
+#define GLOBAL_COLS     10000LL    /* Global matrix dimension, cols */
+#define EXPECTED_SIZE     16LL   /* Number of MPI ranks expected */
+#define GRID_ROWS          4LL
+#define GRID_COLS          4LL
 
 //    /opt/openmpi/5.0.3/bin/mpirun -np 4 --map-by :OVERSUBSCRIBE  ./mpi_dist_matrix
 
@@ -133,7 +133,8 @@ main(
     // the upper-left 10x10 chunk of its local sub-matrix:
     //
     if ( the_server.dist_rank == 0 ) {
-        int     i, j;
+        base_int_t  i, j;
+        int         the_ball;
         
         mpi_printf(-1, "Sub-matrices in sequence by rank:\n\nRank 0:\n");
         for ( i = 0; i < 10; i++ ) {
@@ -142,11 +143,12 @@ main(
                 printf(", %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, j))]);
             printf("\n");
         }
-        MPI_Send(&i, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+        MPI_Send(&the_ball, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
     } else {
-        int     i, j;
+        base_int_t  i, j;
+        int         the_ball;
         
-        MPI_Recv(&i, 1, MPI_INT, the_server.dist_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&the_ball, 1, MPI_INT, the_server.dist_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         printf("\nRank %d:\n", the_server.dist_rank);
         for ( i = the_server.local_sub_matrix_row_range.start; i < the_server.local_sub_matrix_row_range.start + 10; i++ ) {
             printf("    %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, the_server.local_sub_matrix_col_range.start))]);
@@ -155,7 +157,7 @@ main(
             printf("\n");
         }
         if ( the_server.dist_rank + 1 < the_server.dist_size )
-            MPI_Send(&i, 1, MPI_INT, the_server.dist_rank + 1, 0, MPI_COMM_WORLD);
+            MPI_Send(&the_ball, 1, MPI_INT, the_server.dist_rank + 1, 0, MPI_COMM_WORLD);
     }
 
     mpi_printf(-1, "ready to exit");

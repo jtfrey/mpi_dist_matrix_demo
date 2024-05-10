@@ -25,7 +25,7 @@
  * An integer range running from start to (start + length - 1).
  */
 typedef struct {
-    int     start, length;
+    base_int_t  start, length;
 } int_range_t;
 
 /*
@@ -36,8 +36,8 @@ typedef struct {
  */
 static inline int_range_t
 int_range_make(
-    int     start,
-    int     length
+    base_int_t  start,
+    base_int_t  length
 )
 {
     int_range_t r = { .start = start, .length = length };
@@ -53,8 +53,8 @@ int_range_make(
  */
 static inline int_range_t
 int_range_make_with_low_and_high(
-    int     low,
-    int     high
+    base_int_t  low,
+    base_int_t  high
 )
 {
     int_range_t r = { .start = low, .length = (high - low) + 1 };
@@ -95,7 +95,7 @@ int_range_is_valid(
  *
  * Returns the final integer value in the range r.
  */
-static inline int
+static inline base_int_t
 int_range_get_end(
     int_range_t r
 )
@@ -108,7 +108,7 @@ int_range_get_end(
  *
  * Returns the first integer value beyond the range r.
  */
-static inline int
+static inline base_int_t
 int_range_get_max(
     int_range_t r
 )
@@ -125,7 +125,7 @@ int_range_get_max(
 static inline bool
 int_range_does_contain(
     int_range_t r,
-    int         i
+    base_int_t  i
 )
 {
     return ((i >= r.start) && ((i - r.start) < r.length));
@@ -158,8 +158,8 @@ int_range_does_intersect(
     int_range_t r2
 )
 {
-    int         end1 = r1.start + r1.length - 1;
-    int         end2 = r2.start + r2.length - 1;
+    base_int_t  end1 = r1.start + r1.length - 1;
+    base_int_t  end2 = r2.start + r2.length - 1;
     
     return (r1.start < r2.start) ? (end1 >= r2.start) : (end2 >= r1.start);
 }
@@ -179,8 +179,8 @@ int_range_is_adjacent_or_intersecting(
     if (r1.start + r1.length == r2.start) return true;
     if (r2.start + r2.length == r1.start) return true;
     
-    int         end1 = r1.start + r1.length - 1;
-    int         end2 = r2.start + r2.length - 1;
+    base_int_t  end1 = r1.start + r1.length - 1;
+    base_int_t  end2 = r2.start + r2.length - 1;
     
     return (r1.start < r2.start) ? (end1 >= r2.start) : (end2 >= r1.start);
 }
@@ -201,8 +201,8 @@ int_range_intersection(
 )
 {
     int_range_t r;
-    int         end1 = r1.start + r1.length - 1;
-    int         end2 = r2.start + r2.length - 1;
+    base_int_t  end1 = r1.start + r1.length - 1;
+    base_int_t  end2 = r2.start + r2.length - 1;
     
     r.start = (r1.start < r2.start) ? r2.start : r1.start;
     r.length = ((end1 < end2) ? end1 : end2) - r.start + 1;
@@ -225,8 +225,8 @@ int_range_union(
 )
 {
     int_range_t r;
-    int         end1 = r1.start + r1.length - 1;
-    int         end2 = r2.start + r2.length - 1;
+    base_int_t  end1 = r1.start + r1.length - 1;
+    base_int_t  end2 = r2.start + r2.length - 1;
     
     r.start = (r1.start < r2.start) ? r1.start : r2.start;
     r.length = ((end1 < end2) ? end2 : end1) - r.start + 1;

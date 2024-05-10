@@ -15,5 +15,62 @@
 #include <limits.h>
 #include <pthread.h>
 
+#include "mpi.h"
+
+/*
+ * CMake will determine whether this macro is defined
+ * or not based on the ENABLE_INT64 option (off/on).
+ */
+#cmakedefine ENABLE_INT64
+
+/*
+ *@typedef base_int_t
+ *
+ * The type of integer values in this API, used for array
+ * indices, ranges, etc.
+ *
+ * If ENABLE_INT64 is defined during build, 64-bit signed
+ * integers will be used.  Otherwise, 32-bit signed integers
+ * are used.
+ */
+#ifdef ENABLE_INT64
+typedef int64_t base_int_t;
+#else
+typedef int32_t base_int_t;
+#endif
+
+/*
+ *@defined BASE_INT_MAX
+ *
+ * The maximum value of the chosen integer type.
+ */
+#ifdef ENABLE_INT64
+#   define BASE_INT_MAX INT64_MAX
+#else
+#   define BASE_INT_MAX INT32_MAX
+#endif
+
+/*
+ *@defined BASE_INT_FMT
+ *
+ * The printf format for the chosen integer type.
+ */
+#ifdef ENABLE_INT64
+#   define BASE_INT_FMT "%lld"
+#else
+#   define BASE_INT_FMT "%d"
+#endif
+
+/*
+ *@defined MPI_BASE_INT_T
+ *
+ * The MPI Datatype for the chosen integer type.
+ */
+#ifdef ENABLE_INT64
+#   define MPI_BASE_INT_T MPI_INT64_T
+#else
+#   define MPI_BASE_INT_T MPI_INT32_T
+#endif
+
 #endif /* __PROJECT_CONFIG_H__ */
 

@@ -44,7 +44,7 @@ void int_set_destroy(int_set_ref S);
  *
  * Returns the number of integers in the set S.
  */
-int int_set_get_length(int_set_ref S);
+base_int_t int_set_get_length(int_set_ref S);
 
 /*
  * @function int_set_push_int
@@ -54,7 +54,7 @@ int int_set_get_length(int_set_ref S);
  * added, false otherwise (e.g. memory allocation
  * failure).
  */
-bool int_set_push_int(int_set_ref S, int i);
+bool int_set_push_int(int_set_ref S, base_int_t i);
 
 /*
  * @function int_set_push_range
@@ -71,7 +71,7 @@ bool int_set_push_range(int_set_ref S, int_range_t r);
  * Remove integer i from the set S.  Returns true if
  * successful.
  */
-bool int_set_remove_int(int_set_ref S, int i);
+bool int_set_remove_int(int_set_ref S, base_int_t i);
 
 /*
  * @function int_set_remove_range
@@ -88,7 +88,7 @@ bool int_set_remove_range(int_set_ref S, int_range_t r);
  * without removing it from set S.  Returns true if a value
  * was present and *i was set, false if the set is empty.
  */
-bool int_set_peek_next_int(int_set_ref S, int *i);
+bool int_set_peek_next_int(int_set_ref S, base_int_t *i);
 
 /*
  * @function int_set_pop_next_int
@@ -97,7 +97,7 @@ bool int_set_peek_next_int(int_set_ref S, int *i);
  * and remove it from set S.  Returns true if a value
  * was present and *i was set, false if the set was empty.
  */
-bool int_set_pop_next_int(int_set_ref S, int *i);
+bool int_set_pop_next_int(int_set_ref S, base_int_t *i);
 
 /*
  * @function int_set_summary

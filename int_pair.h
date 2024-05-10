@@ -20,7 +20,7 @@
  * An integer pair, a'la a 2D index pair (hint hint).
  */
 typedef struct {
-    int     i, j;
+    base_int_t  i, j;
 } int_pair_t;
 
 /*
@@ -31,8 +31,8 @@ typedef struct {
  */
 static inline int_pair_t
 int_pair_make(
-    int     i,
-    int     j
+    base_int_t  i,
+    base_int_t  j
 )
 {
     int_pair_t p = { .i = i, .j = j };
@@ -75,10 +75,10 @@ int_pair_make_swapped(
  * the linear offset associated with index pair p.  The i index
  * is the major index.
  */
-static inline int
+static inline base_int_t
 int_pair_get_i_major_offset(
     int_pair_t  p,
-    int         leading_dimension
+    base_int_t  leading_dimension
 )
 {
     return p.i * leading_dimension + p.j;
@@ -93,8 +93,8 @@ int_pair_get_i_major_offset(
  */
 static inline int_pair_t
 int_pair_make_with_i_major_offset(
-    int         offset,
-    int         leading_dimension
+    base_int_t  offset,
+    base_int_t  leading_dimension
 )
 {
     int_pair_t  p = {
@@ -111,10 +111,10 @@ int_pair_make_with_i_major_offset(
  * the linear offset associated with index pair p.  The j index
  * is the major index.
  */
-static inline int
+static inline base_int_t
 int_pair_get_j_major_offset(
     int_pair_t  p,
-    int         leading_dimension
+    base_int_t  leading_dimension
 )
 {
     return p.j * leading_dimension + p.i;
@@ -129,8 +129,8 @@ int_pair_get_j_major_offset(
  */
 static inline int_pair_t
 int_pair_make_with_j_major_offset(
-    int         offset,
-    int         leading_dimension
+    base_int_t  offset,
+    base_int_t  leading_dimension
 )
 {
     int_pair_t  p = {

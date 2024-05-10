@@ -4,6 +4,29 @@
 
 /*!
 	@header MPI distributed matrix element server
+	
+	APIs in this header implement the server thread for distributed
+	matrix element production and sub-matrix storage.  Given an MPI
+	runtime of N_rank worker processes, when each worker process
+	calls mpi_server_thread_init() the instance is configured to
+	represent a single block -- the local sub-matrix -- of the global
+	matrix.  The indices associated with each rank are determined by
+	its rank index and the row- versus column-major distribution of
+	local-submatrix blocks.
+	
+	Once the instance is configured, the mpi_server_thread_start()
+	function can be called; a new pthread is spawned and executes
+	the server function:
+	
+	    1. requests for work units are received
+	    2. allocated work units are returned to requestors
+	    3. completed work units are noted
+	    4. any matrix elements in the rank's sub-matrix that are
+	       computed in a different rank are received and stored
+	
+	All ranks respond to event 4, but only the elected root rank will
+	respond to work unit requests.  Since the server operates on its
+	own thread, the root rank can also process matrix elements itself.
 */
 
 #ifndef __MPI_SERVER_THREAD_H__
@@ -123,6 +146,26 @@ typedef struct {
 /*
  * @typedef mpi_server_thread_t
  *
+ * An instance of the data necessary to run an mpi_server_thread.
+ * The size of the global matrix and number of block rows and columns
+ * into which it is fragmented, along with the row/column-major
+ * attribute, determine what row/column indices belong to each MPI
+ * rank.
+ *
+ * The instance can be configured either to handle both roles
+ * (work unit and memory manager) or solely for memory management.
+ * Only a single rank should be configured to handle both roles:
+ * the mpi_server_thread_init() function configures the elected
+ * root rank as such and all other ranks solely for memory
+ * management.
+ *
+ * Storage for the rank's sub-matrix is attached to the instance.
+ * If no external pointer is supplied to mpi_server_thread_init()
+ * it will allocate the storage itself.
+ *
+ * The mpi_server_thread_init() function will also create and
+ * initialize an object in the elected root rank only that represents
+ * the assignable work units for production of matrix elements.
  */
 typedef struct {
     unsigned int                flags;
@@ -148,14 +191,14 @@ typedef struct {
     //
     //
     // First, the global dimension of the matrix (rows and cols):
-    int                 dim_global[2];
+    base_int_t          dim_global[2];
     // The rows and cols per rank:
-    int                 dim_per_rank[2];
+    base_int_t          dim_per_rank[2];
     // The number of blocks by rows and cols:
-    int                 dim_blocks[2];
+    base_int_t          dim_blocks[2];
     // Are blocks associated with ranks across columns
     // (is_row_major == true) or rows:
-    int                 is_row_major;
+    bool                is_row_major;
     // My rank versus the number of ranks:
     int                 dist_rank, dist_size;
     // The rank that will function as root:
@@ -185,8 +228,8 @@ mpi_server_thread_t*
 mpi_server_thread_init(
     mpi_server_thread_t *server_info,
     int root_rank,
-    int global_rows, int global_cols,
-    int grid_rows, int grid_cols,
+    base_int_t global_rows, base_int_t global_cols,
+    base_int_t grid_rows, base_int_t grid_cols,
     bool is_row_major,
     double *local_sub_matrix
 );

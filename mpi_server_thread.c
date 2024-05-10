@@ -11,16 +11,16 @@ const int mpi_client_thread_msg_tag = 3;
 
 static int __mpi_server_thread_int_pair_type_fields = 2;
 static int __mpi_server_thread_int_pair_type_counts[] = {
-                    1, // 1 int
-                    1, // 1 int
+                    1, // 1 base int
+                    1, // 1 base int
                 };
 static MPI_Aint __mpi_server_thread_int_pair_type_offsets[] = {
                     offsetof(int_pair_t, i),
                     offsetof(int_pair_t, j),
                 };
 static MPI_Datatype __mpi_server_thread_int_pair_type_types[] = {
-                    MPI_INT,
-                    MPI_INT
+                    MPI_BASE_INT_T,
+                    MPI_BASE_INT_T
                 };
 
 MPI_Datatype
@@ -158,7 +158,7 @@ __mpi_server_thread_start(
                         int         primary_slot = (SERVER->is_row_major) ?
                                                     (sender_rank / SERVER->dim_blocks[1])
                                                   : (sender_rank / SERVER->dim_blocks[0]);
-                        int         next_index;
+                        base_int_t  next_index;
                         
                         //  By default, no more work available, period:
                         response.msg_type = mpi_server_thread_msg_type_work;
@@ -206,15 +206,15 @@ mpi_server_thread_t*
 mpi_server_thread_init(
     mpi_server_thread_t *server_info,
     int                 root_rank,
-    int                 global_rows,
-    int                 global_cols,
-    int                 grid_rows,
-    int                 grid_cols,
+    base_int_t          global_rows,
+    base_int_t          global_cols,
+    base_int_t          grid_rows,
+    base_int_t          grid_cols,
     bool                is_row_major,
     double              *local_sub_matrix
 )
 {
-    int             r, c;
+    base_int_t          r, c;
     
     // Force the MPI datatypes to get initialized now to avoid later
     // race conditions:
@@ -397,7 +397,7 @@ mpi_server_thread_memory_write(
     double              value
 )
 {
-    int             local_offset = mpi_server_thread_index_global_to_local_offset(server_info, p);
+    base_int_t          local_offset = mpi_server_thread_index_global_to_local_offset(server_info, p);
     
     if ( local_offset >= 0 ) {
         server_info->local_sub_matrix[local_offset] = value;
@@ -426,10 +426,10 @@ mpi_server_thread_summary(
     FILE                *stream
 )
 {
-    fprintf(stream, "mpi_server@%p (roles=%X, dim_global=(%d,%d), dim_per_rank=(%d,%d),\n"
-                    "               dim_blocks=(%d,%d), is_row_major=%s, dist_rank=%d,\n"
-                    "               dist_size=%d, local_sub_matrix_row_range=[%d,%d],\n"
-                    "               local_sub_matrix_col_range=[%d,%d]) {\n",
+    fprintf(stream, "mpi_server@%p (roles=%X, dim_global=(" BASE_INT_FMT "," BASE_INT_FMT "), dim_per_rank=(" BASE_INT_FMT "," BASE_INT_FMT "),\n"
+                    "               dim_blocks=(" BASE_INT_FMT "," BASE_INT_FMT "), is_row_major=%s, dist_rank=%d,\n"
+                    "               dist_size=%d, local_sub_matrix_row_range=[" BASE_INT_FMT "," BASE_INT_FMT "],\n"
+                    "               local_sub_matrix_col_range=[" BASE_INT_FMT "," BASE_INT_FMT "]) {\n",
                     the_server, the_server->roles, the_server->dim_global[0], the_server->dim_global[1],
                     the_server->dim_per_rank[0], the_server->dim_per_rank[1], the_server->dim_blocks[0],
                     the_server->dim_blocks[1], the_server->is_row_major ? "true" : "false",
@@ -473,7 +473,8 @@ mpi_assignable_work_create(
         pthread_mutex_init(&new_work->alloc_lock, NULL);
         
         if ( server_info->is_row_major ) {
-            int     i = 0, r = 0;
+            int         i = 0;
+            base_int_t  r = 0;
             
             while ( i < new_work->n_slots ) {
                 new_work->available_indices[i] = int_set_create();
@@ -487,7 +488,8 @@ mpi_assignable_work_create(
                 r += server_info->dim_per_rank[0];
             }
         } else {
-            int     i = 0, c = 0;
+            int         i = 0;
+            base_int_t  c = 0;
             
             while ( i < new_work->n_slots ) {
                 new_work->available_indices[i] = int_set_create();
@@ -552,14 +554,14 @@ mpi_assignable_work_next_unit(
     int_pair_t              *p_high
 )
 {
-    int                     next_index;
+    base_int_t              next_index;
     bool                    rc = false;
     
     pthread_mutex_lock(&work_units->alloc_lock);
 
     // Try to get a row from the preferred slot:
     if ( int_set_pop_next_int(work_units->available_indices[primary_slot], &next_index) ) {
-        mpi_printf(-1, "allocated index %d from primary slot %d for rank %d", next_index, primary_slot, target_rank);
+        //mpi_printf(-1, "allocated index " BASE_INT_FMT " from primary slot %d for rank %d", next_index, primary_slot, target_rank);
         int_set_push_int(work_units->assigned_indices[primary_slot], next_index);
         if ( work_units->server_info->is_row_major ) {
             p_low->i = next_index; p_high->i = next_index + 1;
@@ -572,7 +574,8 @@ mpi_assignable_work_next_unit(
     } else {
         // Preferred slot was empty, take a work unit from the slot with the
         // most work remaining:
-        int         slot_idx = 0, avail_max = 0, slot_idx_max = -1;
+        int         slot_idx = 0, slot_idx_max = -1;
+        base_int_t  avail_max = 0;
         
         while ( slot_idx < work_units->n_slots ) {
             if ( slot_idx != primary_slot ) {
@@ -587,7 +590,7 @@ mpi_assignable_work_next_unit(
         }
         if ( slot_idx_max >= 0 ) {
             if ( int_set_pop_next_int(work_units->available_indices[slot_idx_max], &next_index) ) {
-                mpi_printf(-1, "allocated index %d from alternate slot %d for rank %d", next_index, slot_idx_max, target_rank);
+                //mpi_printf(-1, "allocated index " BASE_INT_FMT " from alternate slot %d for rank %d", next_index, slot_idx_max, target_rank);
                 int_set_push_int(work_units->assigned_indices[slot_idx_max], next_index);
                 if ( work_units->server_info->is_row_major ) {
                     p_low->i = next_index; p_high->i = next_index + 1;
@@ -616,7 +619,7 @@ mpi_assignable_work_complete(
     pthread_mutex_lock(&work_units->alloc_lock);
     
     if ( work_units->server_info->is_row_major ) {
-        int                 i = p_low.i;
+        base_int_t          i = p_low.i;
         
         while ( i < p_high.i ) {
             int     slot = i / work_units->server_info->dim_per_rank[0];
@@ -625,7 +628,7 @@ mpi_assignable_work_complete(
             int_set_push_int(work_units->completed_indices[slot], i++);
         }
     } else {
-        int                 i = p_low.j;
+        base_int_t          i = p_low.j;
         
         while ( i < p_high.j ) {
             int     slot = i / work_units->server_info->dim_per_rank[1];

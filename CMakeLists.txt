@@ -10,6 +10,8 @@ project(mpi_dist_matrix
     )
 include(GNUInstallDirs)
 
+option(ENABLE_INT64 "Use 64-bit integers for indices et al." ON)
+
 # We need MPI and threading:
 find_package(MPI REQUIRED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)

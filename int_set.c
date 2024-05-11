@@ -378,11 +378,14 @@ int_set_summary(
     FILE        *stream
 )
 {
+    static const char *fmt_counter_eq_0 = "\n    [" BASE_INT_FMT ", " BASE_INT_FMT "]";
+    static const char *fmt_counter_ne_0 = ", [" BASE_INT_FMT ", " BASE_INT_FMT "]";
+    
     int         ri = 0, counter = 0;
     
     fprintf(stream, "int_set@%p (l=%d, c=%d) {", S, S->length, S->capacity);
     while ( ri < S->length ) {
-        fprintf(stream, (counter == 0) ? "\n    [" BASE_INT_FMT ", " BASE_INT_FMT "]" : ", [" BASE_INT_FMT ", " BASE_INT_FMT "]",
+        fprintf(stream, ((counter == 0) ? fmt_counter_eq_0 : fmt_counter_ne_0),
                     S->elements[ri].start, S->elements[ri].start + S->elements[ri].length - 1);
         counter = (counter + 1) % 16;
         ri++;

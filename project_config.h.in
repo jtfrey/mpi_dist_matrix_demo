@@ -57,9 +57,9 @@ typedef int32_t base_int_t;
  * The printf format for the chosen integer type.
  */
 #ifdef ENABLE_INT64
-#   define BASE_INT_FMT PRId64
+#   define BASE_INT_FMT "%"PRId64
 #else
-#   define BASE_INT_FMT PRId32
+#   define BASE_INT_FMT "%"PRId32
 #endif
 
 /*

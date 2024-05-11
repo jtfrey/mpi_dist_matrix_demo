@@ -243,19 +243,48 @@ mpi_server_thread_init(
     server_info->dim_global[0] = global_rows;
     server_info->dim_global[1] = global_cols;
     
-    server_info->dim_per_rank[0] = global_rows / grid_rows;
-    server_info->dim_per_rank[1] = global_cols / grid_cols;
-    
+    // Initial grid dimensions, may be overridden by auto-grid:
     server_info->dim_blocks[0] = grid_rows;
     server_info->dim_blocks[1] = grid_cols;
+    
+    // Auto grid?
+    if ( ! grid_rows || ! grid_cols ) {
+        if ( mpi_auto_grid_2d(server_info->dist_size, true, server_info->dim_global, server_info->dim_blocks) ) {
+            mpi_printf(0, "auto-grid block partitioning yielded " BASE_INT_FMT " x " BASE_INT_FMT,
+                    server_info->dim_blocks[0], server_info->dim_blocks[1]);
+        } else {
+            mpi_printf(0, "auto-grid unable to find an exact fit for %d ranks and global dims " BASE_INT_FMT " x " BASE_INT_FMT,
+                    server_info->dist_size, server_info->dim_global[0], server_info->dim_global[1]);
+            if ( server_info->flags & mpi_server_thread_flag_was_allocated ) free((void*)server_info);
+            return NULL;
+        }
+    }
+    
+    mpi_printf(0, "block grid dimensions [" BASE_INT_FMT "," BASE_INT_FMT "]", server_info->dim_blocks[0], server_info->dim_blocks[1]);
+    
+    server_info->dim_per_rank[0] = global_rows / server_info->dim_blocks[0];
+    server_info->dim_per_rank[1] = global_cols / server_info->dim_blocks[1];
+    
+    mpi_printf(0, "base sub-matrix dimensions [" BASE_INT_FMT "," BASE_INT_FMT "]", server_info->dim_per_rank[0], server_info->dim_per_rank[1]);
     
     server_info->is_row_major = is_row_major;
     
     // Assign global row/col index ranges associated with this rank:
-    r = server_info->dist_rank / server_info->dim_blocks[0];
-    c = server_info->dist_rank % server_info->dim_blocks[0];
-    server_info->local_sub_matrix_row_range = int_range_make(r * server_info->dim_per_rank[0], server_info->dim_per_rank[0]);
-    server_info->local_sub_matrix_col_range = int_range_make(c * server_info->dim_per_rank[1], server_info->dim_per_rank[1]);
+    if ( is_row_major ) {
+        r = server_info->dist_rank / server_info->dim_blocks[1];
+        c = server_info->dist_rank % server_info->dim_blocks[1];
+        server_info->local_sub_matrix_row_range = int_range_make(r * server_info->dim_per_rank[0], server_info->dim_per_rank[0]);
+        server_info->local_sub_matrix_col_range = int_range_make(c * server_info->dim_per_rank[1], server_info->dim_per_rank[1]);
+    } else {
+        r = server_info->dist_rank / server_info->dim_blocks[0];
+        c = server_info->dist_rank % server_info->dim_blocks[0];
+        server_info->local_sub_matrix_row_range = int_range_make(r * server_info->dim_per_rank[0], server_info->dim_per_rank[0]);
+        server_info->local_sub_matrix_col_range = int_range_make(c * server_info->dim_per_rank[1], server_info->dim_per_rank[1]);
+    }
+    
+    mpi_printf(-1, "local sub-matrix indices [" BASE_INT_FMT "," BASE_INT_FMT "]..[" BASE_INT_FMT "," BASE_INT_FMT "]",
+            server_info->local_sub_matrix_row_range.start, server_info->local_sub_matrix_col_range.start,
+            int_range_get_end(server_info->local_sub_matrix_row_range), int_range_get_end(server_info->local_sub_matrix_col_range));
     
     // Setup the local sub-matrix storage:
     if ( ! local_sub_matrix ) {
@@ -264,6 +293,7 @@ mpi_server_thread_init(
             if ( server_info->flags & mpi_server_thread_flag_was_allocated ) free((void*)server_info);
             return NULL;
         }
+        mpi_printf(0, "local sub-matrix allocated");
         server_info->flags |= mpi_server_thread_flag_owns_local_sub_matrix;
     }
     server_info->local_sub_matrix = local_sub_matrix;
@@ -537,6 +567,7 @@ mpi_assignable_work_all_completed(
     while ( i < work_units->n_slots ) {
         if ( int_set_get_length(work_units->available_indices[i]) > 0 ) break;
         if ( int_set_get_length(work_units->assigned_indices[i]) > 0 ) break;
+        if ( int_set_get_length(work_units->completed_indices[i]) < ((work_units->server_info->is_row_major) ? work_units->server_info->dim_per_rank[0] : work_units->server_info->dim_per_rank[0]) ) break;
         i++;
     }
     pthread_mutex_unlock(&work_units->alloc_lock);

@@ -14,4 +14,6 @@
 
 int mpi_printf(int rank, const char *fmt, ...);
 
+bool mpi_auto_grid_2d(int ranks, bool must_be_exact, base_int_t *dim_global, base_int_t *out_dim_blocks);
+
 #endif /* __MPI_UTILS_H__ */

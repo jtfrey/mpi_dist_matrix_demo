@@ -5,11 +5,10 @@
 // Include the matrix element kernel function:
 #include "me_kernel.h"
 
-#define GLOBAL_ROWS     10000LL  /* Global matrix dimension, rows */
-#define GLOBAL_COLS     10000LL    /* Global matrix dimension, cols */
-#define EXPECTED_SIZE     16LL   /* Number of MPI ranks expected */
-#define GRID_ROWS          4LL
-#define GRID_COLS          4LL
+#define GLOBAL_ROWS    10000LL  /* Global matrix dimension, rows */
+#define GLOBAL_COLS    10000LL  /* Global matrix dimension, cols */
+#define GRID_ROWS          0LL
+#define GRID_COLS          0LL
 
 //    /opt/openmpi/5.0.3/bin/mpirun -np 4 --map-by :OVERSUBSCRIBE  ./mpi_dist_matrix
 
@@ -33,11 +32,11 @@ main(
     MPI_Comm_rank(MPI_COMM_WORLD, &the_server.dist_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &thread_req);
     
-    if ( thread_req != EXPECTED_SIZE ) {
-        mpi_printf(0, "ERROR:  this program must be run with %d ranks", EXPECTED_SIZE);
-        MPI_Finalize();
-        exit(1);
-    }
+    //if ( thread_req != EXPECTED_SIZE ) {
+    //    mpi_printf(0, "ERROR:  this program must be run with %d ranks", EXPECTED_SIZE);
+    //    MPI_Finalize();
+    //    exit(1);
+    //}
     
     if ( ! mpi_server_thread_init(&the_server, 0, GLOBAL_ROWS, GLOBAL_COLS, GRID_ROWS, GRID_COLS, true, NULL) ) {
         mpi_printf(-1, "ERROR:  unable to initialize mpi_server instance");
@@ -48,7 +47,7 @@ main(
     mpi_printf(0, "");
     mpi_printf(0, "Welcome to the threaded MPI matrix element work server demo!");
     mpi_printf(0, "");
-    mpi_printf(0, "A %dx%d matrix is distributed across %d ranks and matrix elements of the form", GLOBAL_ROWS, GLOBAL_COLS, EXPECTED_SIZE);
+    mpi_printf(0, "A %dx%d matrix is distributed across %d ranks and matrix elements of the form", GLOBAL_ROWS, GLOBAL_COLS, thread_req);
     mpi_printf(0, "");
     mpi_printf(0, "    %s", me_kernel_description);
     mpi_printf(0, "");

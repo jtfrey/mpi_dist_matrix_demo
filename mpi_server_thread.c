@@ -98,6 +98,7 @@ __mpi_server_thread_cleanup(
     
     pthread_mutex_lock(&SERVER->request_lock);
     if ( SERVER->is_request_active ) {
+        printf("BORK\n");
         MPI_Cancel(&SERVER->active_request);
         SERVER->is_request_active = false;
     }
@@ -199,7 +200,8 @@ __mpi_server_thread_start(
 
 enum {
     mpi_server_thread_flag_was_allocated = 1 << 0,
-    mpi_server_thread_flag_owns_local_sub_matrix = 1 << 1
+    mpi_server_thread_flag_owns_local_sub_matrix = 1 << 1,
+    mpi_server_thread_flag_is_thread_started = 1 << 2
 };
 
 mpi_server_thread_t*
@@ -249,7 +251,7 @@ mpi_server_thread_init(
     
     // Auto grid?
     if ( ! grid_rows || ! grid_cols ) {
-        if ( mpi_auto_grid_2d(server_info->dist_size, true, server_info->dim_global, server_info->dim_blocks) ) {
+        if ( mpi_auto_grid_2d(server_info->dist_size, true, true, server_info->dim_global, server_info->dim_blocks) ) {
             mpi_printf(0, "auto-grid block partitioning yielded " BASE_INT_FMT " x " BASE_INT_FMT,
                     server_info->dim_blocks[0], server_info->dim_blocks[1]);
         } else {
@@ -312,18 +314,41 @@ mpi_server_thread_init(
 
 //
 
+void
+mpi_server_thread_destroy(
+    mpi_server_thread_t *server_info
+)
+{
+    mpi_server_thread_cancel(server_info);
+    
+    // We own the sub-matrix, deallocate it:
+    if ( server_info->local_sub_matrix && (server_info->flags & mpi_server_thread_flag_owns_local_sub_matrix) )
+        free((void*)server_info->local_sub_matrix);
+    
+    // This was not an external instance passed-in, it was dynamically-allocated:
+    if ( server_info->flags & mpi_server_thread_flag_was_allocated )
+        free((void*)server_info);
+}
+
+//
+
 bool
 mpi_server_thread_start(
     mpi_server_thread_t *server_info
 )
 {
-    int         rc = pthread_create(
-                            &server_info->server_thread,
-                            NULL,
-                            __mpi_server_thread_start,
-                            (void*)server_info
-                        );
-    return (rc == 0);
+    if ( ! (server_info->flags & mpi_server_thread_flag_is_thread_started) ) {
+        int         rc = pthread_create(
+                                &server_info->server_thread,
+                                NULL,
+                                __mpi_server_thread_start,
+                                (void*)server_info
+                            );
+        if ( rc != 0 ) return false;
+        
+        server_info->flags |= mpi_server_thread_flag_is_thread_started;
+    }
+    return true;
 }
 
 //
@@ -333,9 +358,13 @@ mpi_server_thread_cancel(
     mpi_server_thread_t *server_info
 )
 {
-    int         rc = pthread_cancel(server_info->server_thread);
-    
-    return (rc == 0);
+    if ( server_info->flags & mpi_server_thread_flag_is_thread_started ) {
+        int     rc = pthread_cancel(server_info->server_thread);
+        
+        if ( rc == 0 )
+            return mpi_server_thread_join(server_info);
+    }
+    return false;
 }
 
 //
@@ -345,9 +374,15 @@ mpi_server_thread_join(
     mpi_server_thread_t *server_info
 )
 {
-    int         rc = pthread_join(server_info->server_thread, NULL);
-    
-    return (rc == 0);
+    if ( server_info->flags & mpi_server_thread_flag_is_thread_started ) {
+        int     rc = pthread_join(server_info->server_thread, NULL);
+        
+        if ( rc == 0 ) {
+            server_info->flags &= ~mpi_server_thread_flag_is_thread_started;
+            return true;
+        }
+    }
+    return false;
 }
 
 //
@@ -388,7 +423,7 @@ mpi_server_thread_index_local_to_global(
 
 //
 
-int
+base_int_t
 mpi_server_thread_index_global_to_local_offset(
     mpi_server_thread_t *server_info,
     int_pair_t          p
@@ -452,7 +487,7 @@ mpi_server_thread_memory_write(
 
 void
 mpi_server_thread_summary(
-    mpi_server_thread_t *the_server,
+    mpi_server_thread_t *server_info,
     FILE                *stream
 )
 {
@@ -460,17 +495,17 @@ mpi_server_thread_summary(
                     "               dim_blocks=(" BASE_INT_FMT "," BASE_INT_FMT "), is_row_major=%s, dist_rank=%d,\n"
                     "               dist_size=%d, local_sub_matrix_row_range=[" BASE_INT_FMT "," BASE_INT_FMT "],\n"
                     "               local_sub_matrix_col_range=[" BASE_INT_FMT "," BASE_INT_FMT "]) {\n",
-                    the_server, the_server->roles, the_server->dim_global[0], the_server->dim_global[1],
-                    the_server->dim_per_rank[0], the_server->dim_per_rank[1], the_server->dim_blocks[0],
-                    the_server->dim_blocks[1], the_server->is_row_major ? "true" : "false",
-                    the_server->dist_rank, the_server->dist_size, the_server->local_sub_matrix_row_range.start,
-                    int_range_get_end(the_server->local_sub_matrix_row_range),
-                    the_server->local_sub_matrix_col_range.start,
-                    int_range_get_end(the_server->local_sub_matrix_col_range)
+                    server_info, server_info->roles, server_info->dim_global[0], server_info->dim_global[1],
+                    server_info->dim_per_rank[0], server_info->dim_per_rank[1], server_info->dim_blocks[0],
+                    server_info->dim_blocks[1], server_info->is_row_major ? "true" : "false",
+                    server_info->dist_rank, server_info->dist_size, server_info->local_sub_matrix_row_range.start,
+                    int_range_get_end(server_info->local_sub_matrix_row_range),
+                    server_info->local_sub_matrix_col_range.start,
+                    int_range_get_end(server_info->local_sub_matrix_col_range)
                 );
-    if ( the_server->roles & mpi_server_thread_role_work_unit_mgr ) {
+    if ( server_info->roles & mpi_server_thread_role_work_unit_mgr ) {
         fprintf(stream, "    assignable_work: ");
-        mpi_assignable_work_summary(the_server->assignable_work, stream);
+        mpi_assignable_work_summary(server_info->assignable_work, stream);
     }
     fprintf(stream, "}\n");
 }

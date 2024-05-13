@@ -224,6 +224,44 @@ typedef struct {
     struct mpi_assignable_work *assignable_work;
 } mpi_server_thread_t;
 
+/*
+ * @function mpi_server_thread_init
+ *
+ * If server_info is NULL, allocate an instance of mpi_server_thread_t.
+ * Otherwise, the existing instance at the address in server_info will
+ * be initialized.
+ *
+ * The root_rank is the MPI rank number that will act as root for the
+ * matrix element generation:  it will run both a memory server and
+ * work unit server.
+ *
+ * The global_rows and global_cols define the dimension of the global
+ * matrix that is to be distributed across ranks.
+ *
+ * The grid_rows and grid_cols can be two non-zero values indicating
+ * how the global matrix will be partitioned.  However, if either is
+ * zero the mpi_auto_grid_2d() function will be used to calculate an
+ * optimal value for each.
+ *
+ * The is_row_major flag determines how sub-matrices map to MPI
+ * ranks and how values are organized in the sub-matrices.  Row-major
+ * makes the sub-matrix column count the leading dimension, and
+ * column-major uses sub-matrix row count as the leading dimension.
+ *
+ * If local_sub_matrix is NULL, then the local sub-matrix will be
+ * allocated by this function.  If non-NULL, local_sub_matrix is
+ * assumed to point to a memory region at least as large as
+ * necessary for the local sub-matrix -- the implication being that
+ * appropriate non-zere grid_rows and grid_cols were passed to the
+ * function.  If the function allocates the local sub-matrix then
+ * it is owned by the instance and will be free()'d when the
+ * instance is destroyed.
+ *
+ * In case of any error, NULL is returned.  Otherwise, a pointer
+ * to the original server_info instance of the newly-allocated
+ * instance is returned.  In the latter case, the caller is
+ * is responsible for disposing of the instance when done.
+ */
 mpi_server_thread_t*
 mpi_server_thread_init(
     mpi_server_thread_t *server_info,
@@ -234,23 +272,121 @@ mpi_server_thread_init(
     double *local_sub_matrix
 );
 
+/*
+ * @function mpi_server_thread_destroy
+ *
+ * Cancels the server thread if running and disposes of any
+ * memory associated with the instance at server_info.
+ * This could include the local sub-matrix or the server_info
+ * instance itself, based on the nature of the
+ * mpi_server_thread_init() call that was used w.r.t.
+ * server_info.
+ */
+void
+mpi_server_thread_destroy(
+    mpi_server_thread_t *server_info
+);
+
+/*
+ * @function mpi_server_thread_start
+ *
+ * Launch the server thread which services the sub-matrix
+ * in server_info.
+ *
+ * Returns true if successful (or the thread was already
+ * running), false if any error was encountered.
+ */
 bool mpi_server_thread_start(mpi_server_thread_t *server_info);
+
+/*
+ * @function mpi_server_thread_cancel
+ *
+ * If the server thread has been launched, attempt to cancel
+ * its execution.  The thread's cleanup procedure will be
+ * triggered which will cancel any pending MPI_Irecv() that
+ * is blocking and terminate the thread.
+ *
+ * Returns true if successful (or the thread was not yet
+ * running), false if any error was encountered.
+ */
 bool mpi_server_thread_cancel(mpi_server_thread_t *server_info);
+
+/*
+ * @function mpi_server_thread_join
+ *
+ * If the server thread has been launched, the calling thread
+ * will block until the server thread's start function completes
+ * and returns.
+ *
+ * Returns true if successful (or the thread was not yet
+ * running), false if any error was encountered.
+ */
 bool mpi_server_thread_join(mpi_server_thread_t *server_info);
 
+/*
+ * @function mpi_server_thread_index_global_to_local
+ *
+ * Convert the row,column index *p from being relative to the
+ * global matrix to relative to the local sub-matrix handled
+ * by server_info.  If *p is not a location within the local
+ * sub-matrix, *p is not altered and false is returned.
+ */
 bool mpi_server_thread_index_global_to_local(mpi_server_thread_t *server_info, int_pair_t *p);
 
+/*
+ * @function mpi_server_thread_index_local_to_global
+ *
+ * Convert the row,column index *p from being relative to the
+ * local sub-matrix handled by server_info to relative to the
+ * global matrix.  If *p is not a location within the local
+ * sub-matrix, *p is not altered and false is returned.
+ */
 bool mpi_server_thread_index_local_to_global(mpi_server_thread_t *server_info, int_pair_t *p);
 
-int mpi_server_thread_index_global_to_local_offset(mpi_server_thread_t *server_info, int_pair_t p);
+/*
+ * @function mpi_server_thread_index_global_to_local_offset
+ *
+ * Convert the row,column index p from being relative to the
+ * global matrix to the linear offset of that position in the
+ * 1D local sub-matrix handled by server_info.  The offset is
+ * is influenced by the row- versus column-major format of
+ * server_info.
+ *
+ * Returns -1 if p is not a location within the local sub-
+ * matrix.
+ */
+base_int_t mpi_server_thread_index_global_to_local_offset(mpi_server_thread_t *server_info, int_pair_t p);
 
+/*
+ * @function mpi_server_thread_index_to_rank
+ *
+ * Calculate the MPI rank for which the global matrix row,column
+ * index p is within its local sub-matrix.
+ *
+ * The calculation is influenced by the row- versus column-major
+ * format of server_info.
+ */
 int mpi_server_thread_index_to_rank(mpi_server_thread_t *server_info, int_pair_t p);
 
+/*
+ * @function mpi_server_thread_memory_write
+ *
+ * Given the global matrix row,column index p and the value to set
+ * at that index, either:
+ *
+ * - set the value in the local sub-matrix if p is a position in it
+ * - determine the MPI rank which holds the sub-matrix for p and send a
+ *   memory write message to it
+ */
 void mpi_server_thread_memory_write(mpi_server_thread_t *server_info, int_pair_t p, double value);
 
-void mpi_server_thread_summary(mpi_server_thread_t *the_server, FILE *stream);
-
-void* mpi_server_thread_thread(void *context);
+/*
+ * @function mpi_server_thread_summary
+ *
+ * Write a textual summary of the server_info instance to the
+ * given file stream.
+ */
+void mpi_server_thread_summary(mpi_server_thread_t *server_info, FILE *stream);
 
 
 typedef struct mpi_assignable_work {

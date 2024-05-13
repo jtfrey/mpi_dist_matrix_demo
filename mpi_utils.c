@@ -64,6 +64,7 @@ bool
 __mpi_auto_grid_2d(
     int         ranks,
     bool        must_be_exact,
+    bool        is_verbose,
     base_int_t  *dim_global,
     base_int_t  *out_dim_blocks
 )
@@ -89,7 +90,7 @@ __mpi_auto_grid_2d(
             dim_ratio_distance = fabs(dim_ratio - 1.0);
             if ( ! must_be_exact || __mpi_auto_grid_2d_is_exact(dim_global, whole_part, whole_part) ) {
                 out_dim_blocks[0] = out_dim_blocks[1] = (base_int_t)whole_part;
-                //mpi_printf(0, "%d [" BASE_INT_FMT "," BASE_INT_FMT "]", must_be_exact, out_dim_blocks[0], out_dim_blocks[1]);
+                if ( is_verbose ) mpi_printf(0, "perfect-square will work: exact=%d [" BASE_INT_FMT "," BASE_INT_FMT "]", must_be_exact, out_dim_blocks[0], out_dim_blocks[1]);
                 return true;
             }
         }
@@ -107,7 +108,7 @@ __mpi_auto_grid_2d(
                 base_int_t  new_dim_distance = __mpi_auto_grid_2d_dim_distance(r2, c2);
                 double      new_ratio_distance = fabs(dim_ratio - (double)r2 / (double)c2);
                 
-                //mpi_printf(0, "%d [" BASE_INT_FMT "," BASE_INT_FMT "] ∆ = " BASE_INT_FMT ", %lf => %d", must_be_exact, r2, c2, new_dim_distance, new_ratio_distance, __mpi_auto_grid_2d_is_exact(dim_global, r2, c2));
+                if ( is_verbose ) mpi_printf(0, "testing: exact=%d [" BASE_INT_FMT "," BASE_INT_FMT "] |r-c|=" BASE_INT_FMT ", ∆(r/c)=%lf, is-exact=%d", must_be_exact, r2, c2, new_dim_distance, new_ratio_distance, __mpi_auto_grid_2d_is_exact(dim_global, r2, c2));
                 // How close to the dimensional ratio?
                 if ( (new_ratio_distance < dim_ratio_distance) && (new_dim_distance <= dim_distance) ) {
                     if ( ! must_be_exact || __mpi_auto_grid_2d_is_exact(dim_global, r2, c2) ) {
@@ -119,7 +120,8 @@ __mpi_auto_grid_2d(
                 }
                 // What if we flip the two values?
                 new_ratio_distance = fabs(dim_ratio - (double)c2 / (double)r2);
-                //mpi_printf(0, "%d [" BASE_INT_FMT "," BASE_INT_FMT "] ∆ = " BASE_INT_FMT ", %lf => %d", must_be_exact, c2, r2, new_dim_distance, new_ratio_distance, __mpi_auto_grid_2d_is_exact(dim_global, r2, c2));
+                
+                if ( is_verbose ) mpi_printf(0, "testing: exact=%d [" BASE_INT_FMT "," BASE_INT_FMT "] |r-c|=" BASE_INT_FMT ", ∆(r/c)=%lf, is-exact=%d", must_be_exact, c2, r2, new_dim_distance, new_ratio_distance, __mpi_auto_grid_2d_is_exact(dim_global, c2, r2));
                 if ( (new_ratio_distance < dim_ratio_distance) && (new_dim_distance <= dim_distance) ) {
                     if ( ! must_be_exact || __mpi_auto_grid_2d_is_exact(dim_global, c2, r2) ) {
                         saved_r = c2;
@@ -139,7 +141,7 @@ __mpi_auto_grid_2d(
         if ( *factors == 0 ) break;
     }
     if ( must_be_exact && ! __mpi_auto_grid_2d_is_exact(dim_global, saved_r, saved_c) ) {
-        if ( __mpi_auto_grid_2d(ranks, false, dim_global, out_dim_blocks) ) {
+        if ( __mpi_auto_grid_2d(ranks, false, is_verbose, dim_global, out_dim_blocks) ) {
             // Which is better, ours or the inexact?
             double      alt_dim_ratio_distance = fabs(dim_ratio - (double)out_dim_blocks[0] / (double)out_dim_blocks[1]);
             
@@ -155,9 +157,10 @@ bool
 mpi_auto_grid_2d(
     int         ranks,
     bool        must_be_exact,
+    bool        is_verbose,
     base_int_t  *dim_global,
     base_int_t  *out_dim_blocks
 )
 {
-    return ( __mpi_auto_grid_2d(ranks, true, dim_global, out_dim_blocks) && (! must_be_exact || __mpi_auto_grid_2d_is_exact(dim_global, out_dim_blocks[0], out_dim_blocks[1])) );
+    return ( __mpi_auto_grid_2d(ranks, true, is_verbose, dim_global, out_dim_blocks) && (! must_be_exact || __mpi_auto_grid_2d_is_exact(dim_global, out_dim_blocks[0], out_dim_blocks[1])) );
 }

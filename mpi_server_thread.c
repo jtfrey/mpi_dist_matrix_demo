@@ -98,7 +98,6 @@ __mpi_server_thread_cleanup(
     
     pthread_mutex_lock(&SERVER->request_lock);
     if ( SERVER->is_request_active ) {
-        printf("BORK\n");
         MPI_Cancel(&SERVER->active_request);
         SERVER->is_request_active = false;
     }

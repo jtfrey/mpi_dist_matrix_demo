@@ -15,7 +15,7 @@ mpi_printf(
     static bool is_inited = false;
     static int _rank, _size, _digits;
     
-    int         n = 0;
+    int         n = 0, fmt_len = strlen(fmt);
     va_list     argv;
 
     if ( ! is_inited ) {
@@ -32,7 +32,7 @@ mpi_printf(
         va_start(argv, fmt);
         n += vprintf(fmt, argv);
         va_end(argv);
-        if ( *(fmt + strlen(fmt) - 1) != '\n' ) n += printf("\n");
+        if ( (fmt_len == 0) || (*(fmt + strlen(fmt) - 1) != '\n') ) n += printf("\n");
     }
     return n;
 }

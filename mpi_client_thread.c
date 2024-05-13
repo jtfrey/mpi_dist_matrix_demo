@@ -5,12 +5,109 @@
 // Include the matrix element kernel function:
 #include "me_kernel.h"
 
-#define GLOBAL_ROWS    10000LL  /* Global matrix dimension, rows */
-#define GLOBAL_COLS    10000LL  /* Global matrix dimension, cols */
-#define GRID_ROWS          0LL
-#define GRID_COLS          0LL
+// Default matrix size
+#define GLOBAL_DIM  10000LL
 
-//    /opt/openmpi/5.0.3/bin/mpirun -np 4 --map-by :OVERSUBSCRIBE  ./mpi_dist_matrix
+// CLI options:
+#include <getopt.h>
+
+static const struct option cliOptions[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "dims", required_argument, NULL, 'd' },
+        { "blocks", required_argument, NULL, 'b' },
+        { "auto-grid", no_argument, NULL, 'a' },
+        { "row-major", no_argument, NULL, 'r' },
+        { "column-major", no_argument, NULL, 'c' },
+        { "root", required_argument, NULL, '0' },
+        { NULL, 0, NULL, 0 }
+    };
+static const char *cliOptionsStr = "hd:b:arc0:";
+
+//
+
+void
+usage(
+    const char  *exe
+)
+{
+    printf(
+            "usage:\n\n"
+            "    %s {options}\n\n"
+            "  options:\n\n"
+            "    --help/-h                  show this information\n"
+            "    --dims/-d <matrix-2d-dims> choose matrix dimensions (default " BASE_INT_FMT ")\n"
+            "    --blocks/-b <block-dims>   choose the global matrix partitioning scheme (default\n"
+            "                               is to use auto-grid)\n"
+            "    --auto-grid/-a             automatically choose the global matrix partitioning\n"
+            "                               scheme\n"
+            "    --row-major/-r             use column-major storage and distribution across ranks\n"
+            "    --column-major/-c          use column-major storage and distribution across ranks\n"
+            "    --root/-0 #                elect the given rank id as the root server\n"
+            "\n"
+            "  <matrix-2d-dims> = # | #,#   given a single integer value, a square matrix of the given\n"
+            "                               number of rows and columns is chosen; otherwise, the first\n"
+            "                               integer in the comma-delimited pair is the row count, the\n"
+            "                               second is the column count\n"
+            "  <block-dims> = # | #,#       paritition the global matrix into:\n"
+            "                                   # : this integer number of rows AND columns\n"
+            "                                   #,# : the given integer number of rows,columns\n"
+            "\n",
+            exe,
+            GLOBAL_DIM
+        );
+}
+
+//
+
+bool
+parseDims(
+    const char  *optarg,
+    base_int_t  *r,
+    base_int_t  *c
+)
+{
+    long long int   lr, lc;
+    char            *endptr;
+    
+    lr = strtoll(optarg, &endptr, 0);
+    if ( lr && (endptr > optarg) ) {
+        switch ( *endptr ) {
+            case ',': {
+                char    *val2ptr = endptr + 1;
+                lc = strtol(val2ptr, &endptr, 0);
+                if ( lc && (endptr > val2ptr) ) {
+                    *r = lr, *c = lc;
+                    return true;
+                } else {
+                    mpi_printf(-1, "error parsing second element of dimensions `%s`", optarg);
+                }
+                break;
+            }
+            case '\0':
+                *r = *c = lr;
+                return true;
+            default:
+                mpi_printf(-1, "invalid character `%c` in dimensions `%s`", *endptr, optarg);
+                break;
+        }
+    } else {
+        mpi_printf(-1, "error parsing first element of dimensions `%s`", optarg);
+    }
+    return false;
+}
+
+//
+
+static inline base_int_t
+base_int_min(
+    base_int_t      i1,
+    base_int_t      i2
+)
+{
+    return (i1 > i2) ? i2 : i1;
+}
+
+//
 
 int
 main(
@@ -18,10 +115,15 @@ main(
     char*       argv[]
 )
 {
-    int                     thread_req, thread_prov;
+    int                     thread_req, thread_prov, optch;
     mpi_server_thread_t     the_server;
     mpi_server_thread_msg_t msg;
     void                    *thread_rc;
+    
+    int                     root_rank = 0;
+    base_int_t              global_rows = GLOBAL_DIM, global_cols = GLOBAL_DIM,
+                            block_rows = 0, block_cols = 0;
+    bool                    is_row_major = true;
     
     thread_req = MPI_THREAD_MULTIPLE;
     MPI_Init_thread(&argc, &argv, thread_req, &thread_prov);
@@ -32,13 +134,50 @@ main(
     MPI_Comm_rank(MPI_COMM_WORLD, &the_server.dist_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &thread_req);
     
-    //if ( thread_req != EXPECTED_SIZE ) {
-    //    mpi_printf(0, "ERROR:  this program must be run with %d ranks", EXPECTED_SIZE);
-    //    MPI_Finalize();
-    //    exit(1);
-    //}
+    while ( (optch = getopt_long(argc, argv, cliOptionsStr, cliOptions, NULL)) != -1 ) {
+        switch ( optch ) {
+        
+            case 'h':
+                if ( the_server.dist_rank == 0 ) usage(argv[0]);
+                exit(0);
+            
+            case 'd':
+                if ( ! parseDims(optarg, &global_rows, &global_cols) ) exit(EINVAL);
+                break;
+            
+            case 'b':
+                if ( ! parseDims(optarg, &block_rows, &block_cols) ) exit(EINVAL);
+                break;
+            
+            case 'a':
+                block_rows = block_cols = 0;
+                break;
+            
+            case 'r':
+                is_row_major = true;
+                break;
+            
+            case 'c':
+                is_row_major = false;
+                break;
+            
+            case '0': {
+                char        *endptr;
+                long int    l = strtol(optarg, &endptr, 0);
+                
+                if ( (l >= 0) && (endptr > optarg) ) {
+                    root_rank = (int)l;
+                } else {
+                    mpi_printf(0, "invalid root rank id `%s`", optarg);
+                    exit(EINVAL);
+                }
+                break;
+            }
+            
+        }
+    }
     
-    if ( ! mpi_server_thread_init(&the_server, 0, GLOBAL_ROWS, GLOBAL_COLS, GRID_ROWS, GRID_COLS, true, NULL) ) {
+    if ( ! mpi_server_thread_init(&the_server, 0, global_rows, global_cols, block_rows, block_cols, is_row_major, NULL) ) {
         mpi_printf(-1, "ERROR:  unable to initialize mpi_server instance");
         MPI_Finalize();
         exit(1);
@@ -47,7 +186,7 @@ main(
     mpi_printf(0, "");
     mpi_printf(0, "Welcome to the threaded MPI matrix element work server demo!");
     mpi_printf(0, "");
-    mpi_printf(0, "A %dx%d matrix is distributed across %d ranks and matrix elements of the form", GLOBAL_ROWS, GLOBAL_COLS, thread_req);
+    mpi_printf(0, "A " BASE_INT_FMT "x" BASE_INT_FMT " matrix is distributed across %d ranks and matrix elements of the form", the_server.dim_global[0], the_server.dim_global[1], thread_req);
     mpi_printf(0, "");
     mpi_printf(0, "    %s", me_kernel_description);
     mpi_printf(0, "");
@@ -136,9 +275,9 @@ main(
         int         the_ball;
         
         mpi_printf(-1, "Sub-matrices in sequence by rank:\n\nRank 0:\n");
-        for ( i = 0; i < 10; i++ ) {
+        for ( i = 0; i < base_int_min(10, the_server.dim_per_rank[0]); i++ ) {
             printf("    %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, 0))]);
-            for ( j = 1; j < 10; j++ )
+            for ( j = 1; j < base_int_min(10, the_server.dim_per_rank[1]); j++ )
                 printf(", %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, j))]);
             printf("\n");
         }
@@ -149,9 +288,9 @@ main(
         
         MPI_Recv(&the_ball, 1, MPI_INT, the_server.dist_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         printf("\nRank %d:\n", the_server.dist_rank);
-        for ( i = the_server.local_sub_matrix_row_range.start; i < the_server.local_sub_matrix_row_range.start + 10; i++ ) {
+        for ( i = the_server.local_sub_matrix_row_range.start; i < the_server.local_sub_matrix_row_range.start + base_int_min(10, the_server.dim_per_rank[0]); i++ ) {
             printf("    %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, the_server.local_sub_matrix_col_range.start))]);
-            for ( j = the_server.local_sub_matrix_col_range.start + 1; j < the_server.local_sub_matrix_col_range.start + 10; j++ )
+            for ( j = the_server.local_sub_matrix_col_range.start + 1; j < the_server.local_sub_matrix_col_range.start + base_int_min(10, the_server.dim_per_rank[1]); j++ )
                 printf(", %8.3lf", the_server.local_sub_matrix[mpi_server_thread_index_global_to_local_offset(&the_server, int_pair_make(i, j))]);
             printf("\n");
         }
